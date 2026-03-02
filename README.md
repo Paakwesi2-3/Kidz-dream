@@ -10,6 +10,8 @@ A React + Tailwind CSS app for managing kids clothing and costume sales.
 - Add buyer phone number for customer follow-up calls
 - Auto-calculate total per sale
 - Show daily summary of all sales
+- Edit or delete a sale when a mistake is made
+- Share today's sales as an image (for WhatsApp/status/send to manager)
 - Show full costume price list with age/size and price
 - Persist sales using localStorage
 - Display total daily sales at the top

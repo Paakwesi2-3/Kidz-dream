@@ -47,3 +47,34 @@ export const insertSaleToSupabase = async (sale) => {
 
   return mapRowToSale(data)
 }
+
+export const updateSaleInSupabase = async (saleId, updates) => {
+  const { data, error } = await supabase
+    .from('sales')
+    .update({
+      item_name: updates.itemName,
+      age: updates.age,
+      quantity: updates.quantity,
+      price_per_item: updates.pricePerItem,
+      total: updates.total,
+      payment_method: updates.paymentMethod,
+      buyer_phone: updates.buyerPhone,
+    })
+    .eq('id', saleId)
+    .select('*')
+    .single()
+
+  if (error) {
+    throw error
+  }
+
+  return mapRowToSale(data)
+}
+
+export const deleteSaleFromSupabase = async (saleId) => {
+  const { error } = await supabase.from('sales').delete().eq('id', saleId)
+
+  if (error) {
+    throw error
+  }
+}

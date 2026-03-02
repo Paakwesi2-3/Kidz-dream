@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
+import html2canvas from 'html2canvas'
 import DailySalesHistory from './components/DailySalesHistory'
 import DailySummary from './components/DailySummary'
 import Inventory from './components/Inventory'
 import MonthlyProfitLoss from './components/MonthlyProfitLoss'
 import SaleForm from './components/SaleForm'
 import { priceCatalog } from './data/priceCatalog'
-import { fetchSalesFromSupabase, insertSaleToSupabase } from './lib/salesService'
+import {
+  deleteSaleFromSupabase,
+  fetchSalesFromSupabase,
+  insertSaleToSupabase,
+  updateSaleInSupabase,
+} from './lib/salesService'
 import { isSupabaseConfigured, supabase } from './lib/supabaseClient'
 
 const SALES_KEY = 'kidz-dream-sales'
@@ -25,6 +31,7 @@ const isToday = (dateString) => {
 function App() {
   const [sales, setSales] = useState([])
   const [pendingSales, setPendingSales] = useState([])
+  const [isSharing, setIsSharing] = useState(false)
   const [syncStatus, setSyncStatus] = useState(
     isSupabaseConfigured ? 'Syncing with Supabase...' : 'Offline mode (local data only)',
   )
@@ -214,6 +221,89 @@ function App() {
     }
   }
 
+  const handleUpdateSale = async (saleId, updates) => {
+    if (!isSupabaseConfigured) {
+      setSales((prevSales) => prevSales.map((sale) => (sale.id === saleId ? { ...sale, ...updates } : sale)))
+      return
+    }
+
+    try {
+      const updatedSale = await updateSaleInSupabase(saleId, updates)
+      setSales((prevSales) => prevSales.map((sale) => (sale.id === saleId ? updatedSale : sale)))
+      setSyncStatus('Live sync active (Supabase)')
+    } catch {
+      alert('Could not update sale right now. Please try again.')
+    }
+  }
+
+  const handleDeleteSale = async (saleId) => {
+    const shouldDelete = window.confirm('Delete this sale?')
+    if (!shouldDelete) {
+      return
+    }
+
+    if (!isSupabaseConfigured) {
+      setSales((prevSales) => prevSales.filter((sale) => sale.id !== saleId))
+      return
+    }
+
+    try {
+      await deleteSaleFromSupabase(saleId)
+      setSales((prevSales) => prevSales.filter((sale) => sale.id !== saleId))
+      setSyncStatus('Live sync active (Supabase)')
+    } catch {
+      alert('Could not delete sale right now. Please try again.')
+    }
+  }
+
+  const handleShareTodaySales = async () => {
+    const cardElement = document.getElementById('today-sales-card')
+
+    if (!cardElement) {
+      alert('Today sales section not found.')
+      return
+    }
+
+    setIsSharing(true)
+
+    try {
+      const canvas = await html2canvas(cardElement, {
+        scale: 2,
+        backgroundColor: '#fdf2f8',
+      })
+
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+
+      if (!blob) {
+        throw new Error('Could not create image')
+      }
+
+      const fileName = `today-sales-${new Date().toISOString().slice(0, 10)}.png`
+      const imageFile = new File([blob], fileName, { type: 'image/png' })
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [imageFile] })) {
+        await navigator.share({
+          title: 'Today Sales Report',
+          text: 'Today sales snapshot',
+          files: [imageFile],
+        })
+      } else {
+        const downloadUrl = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = downloadUrl
+        link.download = fileName
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        URL.revokeObjectURL(downloadUrl)
+      }
+    } catch {
+      alert('Could not share image. Please try again.')
+    } finally {
+      setIsSharing(false)
+    }
+  }
+
   return (
     <main className="min-h-screen bg-pink-50 p-4 sm:p-6">
       <div className="mx-auto max-w-5xl space-y-4">
@@ -224,6 +314,14 @@ function App() {
             <span className="text-sm">Total Daily Sales: </span>
             <span className="text-lg font-bold">GH₵{totalDailySales.toFixed(2)}</span>
           </div>
+          <button
+            type="button"
+            onClick={handleShareTodaySales}
+            disabled={isSharing}
+            className="mt-3 rounded-lg bg-pink-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+          >
+            {isSharing ? 'Preparing image...' : 'Share Today Sales'}
+          </button>
           <p className="mt-2 text-xs text-gray-500">{syncStatus}</p>
         </header>
 
@@ -234,7 +332,9 @@ function App() {
 
         <MonthlyProfitLoss sales={sales} />
 
-        <DailySummary sales={dailySales} />
+        <div id="today-sales-card">
+          <DailySummary sales={dailySales} onUpdateSale={handleUpdateSale} onDeleteSale={handleDeleteSale} />
+        </div>
 
         <DailySalesHistory dailyTotals={dailyTotals} />
       </div>
