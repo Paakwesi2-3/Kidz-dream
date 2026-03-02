@@ -39,6 +39,43 @@ begin
     from pg_policies
     where schemaname = 'public'
       and tablename = 'sales'
+      and policyname = 'Allow update sales'
+  ) then
+    create policy "Allow update sales"
+    on public.sales
+    for update
+    to anon, authenticated
+    using (true)
+    with check (true);
+  end if;
+end
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'sales'
+      and policyname = 'Allow delete sales'
+  ) then
+    create policy "Allow delete sales"
+    on public.sales
+    for delete
+    to anon, authenticated
+    using (true);
+  end if;
+end
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'sales'
       and policyname = 'Allow insert sales'
   ) then
     create policy "Allow insert sales"

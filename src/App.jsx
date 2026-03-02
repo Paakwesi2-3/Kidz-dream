@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import html2canvas from 'html2canvas'
 import DailySalesHistory from './components/DailySalesHistory'
 import DailySummary from './components/DailySummary'
@@ -17,6 +17,9 @@ import { isSupabaseConfigured, supabase } from './lib/supabaseClient'
 const SALES_KEY = 'kidz-dream-sales'
 const PENDING_SALES_KEY = 'kidz-dream-pending-sales'
 
+const isUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+
 const isToday = (dateString) => {
   const today = new Date()
   const date = new Date(dateString)
@@ -32,6 +35,7 @@ function App() {
   const [sales, setSales] = useState([])
   const [pendingSales, setPendingSales] = useState([])
   const [isSharing, setIsSharing] = useState(false)
+  const isFlushingPendingRef = useRef(false)
   const [syncStatus, setSyncStatus] = useState(
     isSupabaseConfigured ? 'Syncing with Supabase...' : 'Offline mode (local data only)',
   )
@@ -97,22 +101,34 @@ function App() {
       return
     }
 
+    if (isFlushingPendingRef.current) {
+      return
+    }
+
     let cancelled = false
 
     const flushPendingSales = async () => {
+      isFlushingPendingRef.current = true
       setSyncStatus(`Syncing ${pendingSales.length} offline sale(s)...`)
 
       for (const pendingSale of pendingSales) {
         try {
-          await insertSaleToSupabase(pendingSale)
+          const insertedSale = await insertSaleToSupabase(pendingSale)
           if (cancelled) {
+            isFlushingPendingRef.current = false
             return
           }
+
+          setSales((prevSales) =>
+            prevSales.map((sale) => (sale.id === pendingSale.id ? insertedSale : sale)),
+          )
+
           setPendingSales((prevPending) => prevPending.filter((sale) => sale.id !== pendingSale.id))
         } catch {
           if (!cancelled) {
             setSyncStatus('Offline sales still pending sync')
           }
+          isFlushingPendingRef.current = false
           return
         }
       }
@@ -128,6 +144,8 @@ function App() {
           setSyncStatus('Synced pending sales, refresh failed temporarily')
         }
       }
+
+      isFlushingPendingRef.current = false
     }
 
     flushPendingSales()
@@ -212,7 +230,12 @@ function App() {
 
     try {
       const insertedSale = await insertSaleToSupabase(newSale)
-      setSales((prevSales) => [insertedSale, ...prevSales])
+      setSales((prevSales) => {
+        if (prevSales.some((sale) => sale.id === insertedSale.id)) {
+          return prevSales
+        }
+        return [insertedSale, ...prevSales]
+      })
       setSyncStatus('Live sync active (Supabase)')
     } catch {
       setSyncStatus('Saved offline, will sync when online')
@@ -222,8 +245,17 @@ function App() {
   }
 
   const handleUpdateSale = async (saleId, updates) => {
-    if (!isSupabaseConfigured) {
+    const isPendingSale = pendingSales.some((sale) => sale.id === saleId)
+
+    if (!isSupabaseConfigured || isPendingSale || !isUuid(saleId)) {
       setSales((prevSales) => prevSales.map((sale) => (sale.id === saleId ? { ...sale, ...updates } : sale)))
+
+      if (isPendingSale) {
+        setPendingSales((prevPending) =>
+          prevPending.map((sale) => (sale.id === saleId ? { ...sale, ...updates } : sale)),
+        )
+      }
+
       return
     }
 
@@ -242,7 +274,12 @@ function App() {
       return
     }
 
-    if (!isSupabaseConfigured) {
+    const isPendingSale = pendingSales.some((sale) => sale.id === saleId)
+
+    if (!isSupabaseConfigured || isPendingSale || !isUuid(saleId)) {
+      if (isPendingSale) {
+        setPendingSales((prevPending) => prevPending.filter((sale) => sale.id !== saleId))
+      }
       setSales((prevSales) => prevSales.filter((sale) => sale.id !== saleId))
       return
     }
