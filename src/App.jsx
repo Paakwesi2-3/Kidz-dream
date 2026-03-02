@@ -16,9 +16,35 @@ import { isSupabaseConfigured, supabase } from './lib/supabaseClient'
 
 const SALES_KEY = 'kidz-dream-sales'
 const PENDING_SALES_KEY = 'kidz-dream-pending-sales'
+const PENDING_UPDATES_KEY = 'kidz-dream-pending-updates'
+const PENDING_DELETES_KEY = 'kidz-dream-pending-deletes'
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+
+const saleFingerprint = (sale) =>
+  [
+    sale.itemName || '',
+    sale.age || '',
+    Number(sale.pricePerItem || 0).toFixed(2),
+    Number(sale.total || 0).toFixed(2),
+    sale.paymentMethod || '',
+    sale.buyerPhone || '',
+    sale.createdAt || '',
+  ].join('|')
+
+const dedupeSales = (salesList) => {
+  const seen = new Set()
+
+  return salesList.filter((sale) => {
+    const key = saleFingerprint(sale)
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
 
 const isToday = (dateString) => {
   const today = new Date()
@@ -34,7 +60,10 @@ const isToday = (dateString) => {
 function App() {
   const [sales, setSales] = useState([])
   const [pendingSales, setPendingSales] = useState([])
+  const [pendingUpdates, setPendingUpdates] = useState([])
+  const [pendingDeletes, setPendingDeletes] = useState([])
   const [isSharing, setIsSharing] = useState(false)
+  const salesRef = useRef([])
   const isFlushingPendingRef = useRef(false)
   const [syncStatus, setSyncStatus] = useState(
     isSupabaseConfigured ? 'Syncing with Supabase...' : 'Offline mode (local data only)',
@@ -43,12 +72,22 @@ function App() {
   useEffect(() => {
     const savedSales = localStorage.getItem(SALES_KEY)
     if (savedSales) {
-      setSales(JSON.parse(savedSales))
+      setSales(dedupeSales(JSON.parse(savedSales)))
     }
 
     const savedPendingSales = localStorage.getItem(PENDING_SALES_KEY)
     if (savedPendingSales) {
       setPendingSales(JSON.parse(savedPendingSales))
+    }
+
+    const savedPendingUpdates = localStorage.getItem(PENDING_UPDATES_KEY)
+    if (savedPendingUpdates) {
+      setPendingUpdates(JSON.parse(savedPendingUpdates))
+    }
+
+    const savedPendingDeletes = localStorage.getItem(PENDING_DELETES_KEY)
+    if (savedPendingDeletes) {
+      setPendingDeletes(JSON.parse(savedPendingDeletes))
     }
 
     if (!isSupabaseConfigured) {
@@ -58,7 +97,7 @@ function App() {
     const loadSales = async () => {
       try {
         const remoteSales = await fetchSalesFromSupabase()
-        setSales(remoteSales)
+        setSales(dedupeSales(remoteSales))
         setSyncStatus('Live sync active (Supabase)')
       } catch {
         setSyncStatus('Supabase error: using local backup')
@@ -75,7 +114,7 @@ function App() {
         async () => {
           try {
             const latestSales = await fetchSalesFromSupabase()
-            setSales(latestSales)
+            setSales(dedupeSales(latestSales))
           } catch {
             setSyncStatus('Realtime update failed temporarily')
           }
@@ -89,12 +128,21 @@ function App() {
   }, [])
 
   useEffect(() => {
+    salesRef.current = sales
     localStorage.setItem(SALES_KEY, JSON.stringify(sales))
   }, [sales])
 
   useEffect(() => {
     localStorage.setItem(PENDING_SALES_KEY, JSON.stringify(pendingSales))
   }, [pendingSales])
+
+  useEffect(() => {
+    localStorage.setItem(PENDING_UPDATES_KEY, JSON.stringify(pendingUpdates))
+  }, [pendingUpdates])
+
+  useEffect(() => {
+    localStorage.setItem(PENDING_DELETES_KEY, JSON.stringify(pendingDeletes))
+  }, [pendingDeletes])
 
   useEffect(() => {
     if (!isSupabaseConfigured || pendingSales.length === 0 || !navigator.onLine) {
@@ -113,6 +161,18 @@ function App() {
 
       for (const pendingSale of pendingSales) {
         try {
+          const alreadySyncedSale = salesRef.current.find(
+            (sale) => isUuid(sale.id) && saleFingerprint(sale) === saleFingerprint(pendingSale),
+          )
+
+          if (alreadySyncedSale) {
+            setSales((prevSales) =>
+              prevSales.map((sale) => (sale.id === pendingSale.id ? alreadySyncedSale : sale)),
+            )
+            setPendingSales((prevPending) => prevPending.filter((sale) => sale.id !== pendingSale.id))
+            continue
+          }
+
           const insertedSale = await insertSaleToSupabase(pendingSale)
           if (cancelled) {
             isFlushingPendingRef.current = false
@@ -136,7 +196,7 @@ function App() {
       try {
         const latestSales = await fetchSalesFromSupabase()
         if (!cancelled) {
-          setSales(latestSales)
+          setSales(dedupeSales(latestSales))
           setSyncStatus('Live sync active (Supabase)')
         }
       } catch {
@@ -154,6 +214,44 @@ function App() {
       cancelled = true
     }
   }, [pendingSales])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !navigator.onLine || pendingUpdates.length === 0) {
+      return
+    }
+
+    const flushPendingUpdates = async () => {
+      for (const pendingUpdate of pendingUpdates) {
+        try {
+          await updateSaleInSupabase(pendingUpdate.saleId, pendingUpdate.updates)
+          setPendingUpdates((prev) => prev.filter((entry) => entry.saleId !== pendingUpdate.saleId))
+        } catch {
+          return
+        }
+      }
+    }
+
+    flushPendingUpdates()
+  }, [pendingUpdates])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !navigator.onLine || pendingDeletes.length === 0) {
+      return
+    }
+
+    const flushPendingDeletes = async () => {
+      for (const pendingDeleteId of pendingDeletes) {
+        try {
+          await deleteSaleFromSupabase(pendingDeleteId)
+          setPendingDeletes((prev) => prev.filter((id) => id !== pendingDeleteId))
+        } catch {
+          return
+        }
+      }
+    }
+
+    flushPendingDeletes()
+  }, [pendingDeletes])
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -264,7 +362,12 @@ function App() {
       setSales((prevSales) => prevSales.map((sale) => (sale.id === saleId ? updatedSale : sale)))
       setSyncStatus('Live sync active (Supabase)')
     } catch {
-      alert('Could not update sale right now. Please try again.')
+      setSales((prevSales) => prevSales.map((sale) => (sale.id === saleId ? { ...sale, ...updates } : sale)))
+      setPendingUpdates((prev) => {
+        const remaining = prev.filter((entry) => entry.saleId !== saleId)
+        return [{ saleId, updates }, ...remaining]
+      })
+      setSyncStatus('Update saved offline, will sync when online')
     }
   }
 
@@ -289,7 +392,9 @@ function App() {
       setSales((prevSales) => prevSales.filter((sale) => sale.id !== saleId))
       setSyncStatus('Live sync active (Supabase)')
     } catch {
-      alert('Could not delete sale right now. Please try again.')
+      setSales((prevSales) => prevSales.filter((sale) => sale.id !== saleId))
+      setPendingDeletes((prev) => (prev.includes(saleId) ? prev : [saleId, ...prev]))
+      setSyncStatus('Delete saved offline, will sync when online')
     }
   }
 
