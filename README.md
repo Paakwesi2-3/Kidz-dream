@@ -16,6 +16,7 @@ A React + Tailwind CSS app for managing kids clothing and costume sales.
 - Save and show daily totals by date automatically
 - Show automatic monthly sales total from recorded sales
 - Optional live sync with Supabase (multi-device)
+- Works offline as an installable PWA (syncs pending sales when internet returns)
 
 ## Run
 
@@ -76,3 +77,12 @@ Without keys, it automatically uses localStorage fallback.
 	- `VITE_SUPABASE_URL`
 	- `VITE_SUPABASE_ANON_KEY`
 5. Deploy.
+
+## Offline usage (PWA)
+
+- Open the deployed app once while online.
+- Install it to your device:
+	- Android/Chrome: menu → Install app
+	- iPhone/Safari: Share → Add to Home Screen
+- After install, app pages load offline.
+- Sales entered offline are saved locally and auto-sync to Supabase when internet returns.

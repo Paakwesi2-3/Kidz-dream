@@ -9,6 +9,7 @@ import { fetchSalesFromSupabase, insertSaleToSupabase } from './lib/salesService
 import { isSupabaseConfigured, supabase } from './lib/supabaseClient'
 
 const SALES_KEY = 'kidz-dream-sales'
+const PENDING_SALES_KEY = 'kidz-dream-pending-sales'
 
 const isToday = (dateString) => {
   const today = new Date()
@@ -23,18 +24,23 @@ const isToday = (dateString) => {
 
 function App() {
   const [sales, setSales] = useState([])
+  const [pendingSales, setPendingSales] = useState([])
   const [syncStatus, setSyncStatus] = useState(
     isSupabaseConfigured ? 'Syncing with Supabase...' : 'Offline mode (local data only)',
   )
 
   useEffect(() => {
+    const savedSales = localStorage.getItem(SALES_KEY)
+    if (savedSales) {
+      setSales(JSON.parse(savedSales))
+    }
+
+    const savedPendingSales = localStorage.getItem(PENDING_SALES_KEY)
+    if (savedPendingSales) {
+      setPendingSales(JSON.parse(savedPendingSales))
+    }
+
     if (!isSupabaseConfigured) {
-      const savedSales = localStorage.getItem(SALES_KEY)
-
-      if (savedSales) {
-        setSales(JSON.parse(savedSales))
-      }
-
       return
     }
 
@@ -45,10 +51,6 @@ function App() {
         setSyncStatus('Live sync active (Supabase)')
       } catch {
         setSyncStatus('Supabase error: using local backup')
-        const savedSales = localStorage.getItem(SALES_KEY)
-        if (savedSales) {
-          setSales(JSON.parse(savedSales))
-        }
       }
     }
 
@@ -78,6 +80,72 @@ function App() {
   useEffect(() => {
     localStorage.setItem(SALES_KEY, JSON.stringify(sales))
   }, [sales])
+
+  useEffect(() => {
+    localStorage.setItem(PENDING_SALES_KEY, JSON.stringify(pendingSales))
+  }, [pendingSales])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || pendingSales.length === 0 || !navigator.onLine) {
+      return
+    }
+
+    let cancelled = false
+
+    const flushPendingSales = async () => {
+      setSyncStatus(`Syncing ${pendingSales.length} offline sale(s)...`)
+
+      for (const pendingSale of pendingSales) {
+        try {
+          await insertSaleToSupabase(pendingSale)
+          if (cancelled) {
+            return
+          }
+          setPendingSales((prevPending) => prevPending.filter((sale) => sale.id !== pendingSale.id))
+        } catch {
+          if (!cancelled) {
+            setSyncStatus('Offline sales still pending sync')
+          }
+          return
+        }
+      }
+
+      try {
+        const latestSales = await fetchSalesFromSupabase()
+        if (!cancelled) {
+          setSales(latestSales)
+          setSyncStatus('Live sync active (Supabase)')
+        }
+      } catch {
+        if (!cancelled) {
+          setSyncStatus('Synced pending sales, refresh failed temporarily')
+        }
+      }
+    }
+
+    flushPendingSales()
+
+    return () => {
+      cancelled = true
+    }
+  }, [pendingSales])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      return
+    }
+
+    const handleOnline = () => {
+      if (pendingSales.length > 0) {
+        setSyncStatus(`Back online: ${pendingSales.length} sale(s) waiting to sync`)
+      } else {
+        setSyncStatus('Live sync active (Supabase)')
+      }
+    }
+
+    window.addEventListener('online', handleOnline)
+    return () => window.removeEventListener('online', handleOnline)
+  }, [pendingSales.length])
 
   const dailySales = useMemo(() => sales.filter((sale) => isToday(sale.createdAt)), [sales])
 
@@ -138,8 +206,10 @@ function App() {
     try {
       const insertedSale = await insertSaleToSupabase(newSale)
       setSales((prevSales) => [insertedSale, ...prevSales])
+      setSyncStatus('Live sync active (Supabase)')
     } catch {
-      setSyncStatus('Save failed on Supabase, saved locally')
+      setSyncStatus('Saved offline, will sync when online')
+      setPendingSales((prevPending) => [newSale, ...prevPending])
       setSales((prevSales) => [newSale, ...prevSales])
     }
   }
