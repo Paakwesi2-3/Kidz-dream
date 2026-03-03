@@ -306,6 +306,17 @@ function App() {
     [dailySales],
   )
 
+  const todayDateLabel = useMemo(
+    () =>
+      new Date().toLocaleDateString(undefined, {
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      }),
+    [],
+  )
+
   const handleAddSale = async ({ itemName, age, quantity, pricePerItem, total, paymentMethod, buyerPhone }) => {
     const createdAt = new Date().toISOString()
 
@@ -474,7 +485,12 @@ function App() {
 
         <MonthlyProfitLoss sales={sales} />
 
-        <div id="today-sales-card">
+        <div id="today-sales-card" className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-pink-100">
+          <div className="mb-3 rounded-lg bg-pink-50 px-3 py-2 text-pink-800">
+            <p className="text-sm font-medium">Today Sales Snapshot</p>
+            <p className="text-sm text-gray-600">Date: {todayDateLabel}</p>
+            <p className="text-base font-bold">Total: GH₵{totalDailySales.toFixed(2)}</p>
+          </div>
           <DailySummary sales={dailySales} onUpdateSale={handleUpdateSale} onDeleteSale={handleDeleteSale} />
         </div>
 
