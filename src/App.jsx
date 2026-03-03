@@ -409,7 +409,7 @@ function App() {
     }
   }
 
-  const handleShareTodaySales = async () => {
+  const handleSaveTodaySalesImage = async () => {
     const cardElement = document.getElementById('today-sales-card')
 
     if (!cardElement) {
@@ -432,26 +432,16 @@ function App() {
       }
 
       const fileName = `today-sales-${new Date().toISOString().slice(0, 10)}.png`
-      const imageFile = new File([blob], fileName, { type: 'image/png' })
-
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [imageFile] })) {
-        await navigator.share({
-          title: 'Today Sales Report',
-          text: 'Today sales snapshot',
-          files: [imageFile],
-        })
-      } else {
-        const downloadUrl = URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = downloadUrl
-        link.download = fileName
-        document.body.appendChild(link)
-        link.click()
-        link.remove()
-        URL.revokeObjectURL(downloadUrl)
-      }
+      const downloadUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(downloadUrl)
     } catch {
-      alert('Could not share image. Please try again.')
+      alert('Could not save image. Please try again.')
     } finally {
       setIsSharing(false)
     }
@@ -469,11 +459,11 @@ function App() {
           </div>
           <button
             type="button"
-            onClick={handleShareTodaySales}
+            onClick={handleSaveTodaySalesImage}
             disabled={isSharing}
             className="mt-3 rounded-lg bg-pink-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
           >
-            {isSharing ? 'Preparing image...' : 'Share Today Sales'}
+            {isSharing ? 'Preparing image...' : 'Save Today Sales Image'}
           </button>
           <p className="mt-2 text-xs text-gray-500">{syncStatus}</p>
         </header>
